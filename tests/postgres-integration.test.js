@@ -9,7 +9,7 @@ after(async () => {
   await pool.end()
 })
 
-test('MySQL CRUD API works against the configured database', async () => {
+test('PostgreSQL CRUD API works against the configured database', async () => {
   await checkDatabaseConnection()
   const uniqueId = randomUUID()
   const title = `integration-${uniqueId}`
@@ -130,7 +130,7 @@ test('MySQL CRUD API works against the configured database', async () => {
       headers,
       body: JSON.stringify({
         title,
-        description: 'Temporary MySQL integration test row',
+        description: 'Temporary PostgreSQL integration test row',
         start_date: new Date().toISOString().slice(0, 10),
         due_date: new Date().toISOString().slice(0, 10),
         status: 'To do',
@@ -303,7 +303,7 @@ test('MySQL CRUD API works against the configured database', async () => {
     const adminTasks = await fetch(`${baseUrl}/api/admin/tasks?limit=5`, { headers: adminHeaders })
     assert.equal(adminTasks.status, 200)
     assert.ok((await adminTasks.json()).items.length > 0)
-    await queryDatabase('UPDATE tasks SET due_date = DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY) WHERE id = ?', [createdTask.id])
+    await queryDatabase("UPDATE tasks SET due_date = CURRENT_DATE - INTERVAL '1 day' WHERE id = ?", [createdTask.id])
     const overdueTasks = await fetch(`${baseUrl}/api/admin/tasks?ownerId=${profile.id}&overdue=true`, { headers: adminHeaders })
     assert.equal(overdueTasks.status, 200)
     assert.ok((await overdueTasks.json()).items.some((task) => task.id === createdTask.id))
@@ -409,7 +409,7 @@ test('MySQL CRUD API works against the configured database', async () => {
     await queryDatabase(
       `INSERT INTO password_reset_tokens
          (user_id, email_hash, request_ip_hash, token_hash, expires_at)
-       VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 MINUTE))`,
+       VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, CURRENT_TIMESTAMP + INTERVAL '30 minutes')`,
       [email, 'e'.repeat(64), 'f'.repeat(64), createHash('sha256').update(resetToken).digest('hex')],
     )
     const resetPassword = await fetch(`${baseUrl}/api/auth/reset-password`, {

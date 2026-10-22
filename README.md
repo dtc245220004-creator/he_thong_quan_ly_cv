@@ -1,305 +1,228 @@
-# Task Tracker
+# Task Tracker — Đề tài 24
 
-Task Tracker là ứng dụng quản lý công việc bằng React + Vite, Node.js + Express
-và MySQL. Người dùng chỉ truy cập công việc của mình; quyền quản trị được kiểm
-tra ở backend. Tài khoản demo là tùy chọn, chỉ khởi tạo bằng lệnh CLI ở môi
-trường development/test và không được tạo tự động.
+Ứng dụng quản lý công việc cá nhân/nhóm, triển khai bằng Docker Compose.
+Frontend React/Vite, API Node.js/Express và PostgreSQL; pgAdmin quản trị CSDL.
+Nginx làm reverse proxy HTTPS; Prometheus/Grafana thu thập và hiển thị
+metrics; Loki/Promtail tập trung log và truy vấn bằng LogQL.
 
-## 1. Phần mềm cần cài
+Bản thảo báo cáo tiếng Việt (có thông tin sinh viên và ảnh demo cần bổ sung)
+ở [REPORT.md](./REPORT.md).
 
-- Node.js 22.12 trở lên và npm.
-- MySQL Server 8 trở lên.
-- MySQL Workbench để tạo schema, xem và quản lý dữ liệu.
+## Kiến trúc
 
-MySQL Workbench là công cụ quản trị; MySQL Server mới là dịch vụ lưu trữ. Dự
-án hiện không định nghĩa Docker Compose, Nginx, Prometheus, Grafana, Loki hay
-Promtail. Các dịch vụ này không cần cho cách chạy Node/Vite dưới đây.
-
-## 2. Cài MySQL Server và tạo database
-
-Khởi động dịch vụ MySQL Server. Mở MySQL Workbench, kết nối tới server local
-(thường là `127.0.0.1:3306`) rồi chạy:
-
-```sql
-CREATE DATABASE IF NOT EXISTS task_tracker
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
+```mermaid
+flowchart LR
+  Browser -->|HTTPS :443| Nginx
+  Nginx -->|/api, /health| API
+  Nginx -->|/grafana| Grafana
+  API --> PostgreSQL
+  pgAdmin --> PostgreSQL
+  Prometheus --> API
+  Prometheus --> NginxExporter
+  Prometheus --> PostgreSQLExporter
+  Prometheus --> cAdvisor
+  Promtail -->|Docker JSON logs| Loki
+  Grafana --> Prometheus
+  Grafana --> Loki
 ```
 
-Không chạy lệnh xóa schema/database. Nếu đã có database với tên khác, cấu hình
-`DB_NAME` tương ứng; ứng dụng không tự xóa hay tạo lại database.
+Các mạng Compose được tách thành `edge`, `database` và `monitoring`. Backend
+API và PostgreSQL không publish cổng ra host. pgAdmin, Prometheus và Grafana
+chỉ bind trên `127.0.0.1`; website đi qua Nginx.
 
-## 3. Cấu hình môi trường
+## Yêu cầu chạy
 
-Tại thư mục gốc, sao chép `.env.example` thành `.env` và nhập thông tin MySQL
-local của bạn:
+- Docker Desktop với Linux containers (Windows/macOS) hoặc Docker Engine.
+- Docker Compose v2 (`docker compose`).
+- Cổng 80, 443, 3000, 5050 và 9090 chưa bị ứng dụng khác chiếm dụng.
+- RAM nên từ 4 GB vì stack có PostgreSQL, Grafana, Prometheus, Loki và
+  cAdvisor.
 
-```dotenv
-PORT=3001
-NODE_ENV=development
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=mat_khau_mysql_cua_ban
-DB_NAME=task_tracker
-VITE_API_BASE_URL=/api
-VITE_BACKEND_URL=http://localhost:3001
-CLIENT_ORIGIN=http://localhost:5173,http://127.0.0.1:5173
-SESSION_COOKIE_SAME_SITE=Lax
-```
+## Cấu hình bí mật
 
-Không commit `.env` và không ghi mật khẩu thật vào source code. Trong môi
-trường deploy cần đặt `CLIENT_ORIGIN` thành origin chính xác của frontend.
-Frontend và API nên được phục vụ cùng site. Nếu cần cookie cross-site, chỉ
-dùng HTTPS, đặt `SESSION_COOKIE_SAME_SITE=None`, và cấu hình CORS origin cụ
-thể; không dùng wildcard origin với cookie.
+1. Sao chép `.env.example` thành `.env` nếu chưa có. Nếu đã có `.env`, **không
+   ghi đè**: bổ sung/cập nhật các biến PostgreSQL, PostgreSQL admin, pgAdmin và
+   Grafana từ mẫu.
+2. Thay mọi chuỗi `replace_with_...` bằng mật khẩu ngẫu nhiên riêng biệt,
+   dài tối thiểu 20 ký tự; không dùng chung mật khẩu giữa database, pgAdmin
+   và Grafana.
+3. Không commit `.env`, không đưa mật khẩu vào ảnh chụp màn hình hoặc báo cáo.
+   `.env` đã nằm trong `.gitignore`.
 
-## 4. Cài dependencies và khởi tạo schema
+`DB_USER` là role ứng dụng PostgreSQL riêng, không phải superuser.
+`DB_MONITOR_USER` là role exporter riêng, được cấp `pg_monitor` và quyền
+kết nối DB để đọc metrics. `POSTGRES_USER` là superuser quản trị nội bộ
+container; chỉ `DB_USER` sở hữu database ứng dụng. `PGADMIN_DEFAULT_EMAIL`
+là tài khoản đăng nhập pgAdmin, không phải tài khoản PostgreSQL.
+
+## Khởi động toàn bộ hệ thống
+
+Từ thư mục gốc:
 
 ```powershell
-npm install
-npm run db:init
-npm run db:check
+docker compose config
+docker compose up -d --build
+docker compose ps
 ```
 
-Script khởi tạo tạo các bảng `users`, `auth_sessions`, `tasks`,
-`admin_activity`, `admin_guard` và token đặt lại mật khẩu nếu chưa có; bổ sung
-avatar, `completed_at`, khóa seed và các index còn thiếu. Script không drop
-bảng, không tự động seed dữ liệu. Lịch sử hoàn
-thành cũ không thể khôi phục đáng tin cậy nên các task `Done` hiện có được giữ
-`completed_at = NULL`, không bị gán thời gian hiện tại. Chạy lại an toàn trên
-schema ứng dụng.
+Container API chờ PostgreSQL khỏe, khởi tạo schema có tính lặp an toàn rồi mới
+khởi động HTTP server. Lần đầu sẽ tải image và build frontend/backend nên có
+thể mất vài phút.
 
-Nếu database đã có công việc từ phiên bản chưa có tài khoản, các hàng đó được
-giữ nguyên với `owner_id` rỗng và không xuất hiện trong tài khoản mới. Hãy
-chủ động quyết định cách phân quyền/chuyển những dữ liệu cũ trong Workbench;
-không tự động gán chúng cho một người dùng.
+| Thành phần | Địa chỉ | Ghi chú |
+| --- | --- | --- |
+| Website | <https://localhost> | Chứng thư tự ký; trình duyệt sẽ cảnh báo lần đầu |
+| Website HTTP | <http://localhost> | Chuyển hướng sang HTTPS |
+| API health | <https://localhost/health> | Health check qua Nginx |
+| pgAdmin | <http://localhost:5050> | Chỉ truy cập từ máy local |
+| Grafana | <https://localhost/grafana/> | Dashboard và Explore |
+| Prometheus | <http://localhost:9090> | Chỉ truy cập từ máy local |
 
-## 5. Chạy ứng dụng
+Đăng nhập pgAdmin bằng `PGADMIN_DEFAULT_EMAIL`/`PGADMIN_DEFAULT_PASSWORD`,
+sau đó đăng ký server:
 
-Khởi động cả backend và frontend:
+- **Host name/address:** `postgres`
+- **Port:** `5432`
+- **Maintenance database:** giá trị `DB_NAME` (mặc định `task_tracker`)
+- **Username:** giá trị `DB_USER` (mặc định `task_tracker`)
+- **Password:** giá trị `DB_PASSWORD`
+
+Grafana dùng `GRAFANA_ADMIN_USER` và `GRAFANA_ADMIN_PASSWORD`. Dashboard
+**Task Tracker - System Overview** được provision tự động. Khi mở website
+HTTPS lần đầu, chấp nhận ngoại lệ chứng thư tự ký để trình duyệt cho phép
+cookie phiên `Secure`.
+
+## Tạo tài khoản Admin ứng dụng
+
+Đặt ba biến môi trường `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` trong
+PowerShell rồi chạy lệnh one-off sau (mật khẩu không được lưu trong source):
 
 ```powershell
-npm run dev
+$env:ADMIN_EMAIL = "admin@example.edu"
+$env:ADMIN_NAME = "System Admin"
+$env:ADMIN_PASSWORD = "Use-A-Unique-Strong-Password-123"
+docker compose run --rm --no-deps -e ADMIN_EMAIL -e ADMIN_NAME -e ADMIN_PASSWORD api node backend/src/create-admin.js
+Remove-Item Env:ADMIN_EMAIL, Env:ADMIN_NAME, Env:ADMIN_PASSWORD
 ```
 
-Hoặc mở hai terminal tại thư mục gốc:
+Mật khẩu phải dài ít nhất 12 ký tự, tối đa 72 byte. Không dùng mật khẩu ví dụ
+trong môi trường thật. Có thể tạo tài khoản người dùng thường từ trang đăng ký.
 
-```powershell
-npm run dev:backend
-npm run dev:frontend
+## Giám sát Prometheus/Grafana
+
+Prometheus scrape định kỳ:
+
+- `api:3001/metrics`: số lượng request, thời gian xử lý HTTP và metrics Node.js.
+- `nginx-exporter:9113`: thống kê truy cập Nginx.
+- `postgres-exporter:9187`: tình trạng PostgreSQL và kết nối.
+- `cadvisor:8080`: CPU/RAM và trạng thái container.
+
+Trong Prometheus, kiểm tra **Status → Targets** hoặc chạy PromQL:
+
+```promql
+up
+rate(http_request_duration_seconds_count{route!="/metrics"}[5m])
+container_memory_working_set_bytes{name!=""}
+pg_up
+rate(nginx_http_requests_total[5m])
 ```
 
-- Website: http://localhost:5173
-- API health: http://localhost:3001/health
+Dashboard Grafana có panel request rate, latency p95, CPU/RAM container,
+PostgreSQL availability và Nginx request rate. Một số panel cần có traffic
+hoặc metrics exporter khỏe mới hiện dữ liệu.
 
-Mở website, chọn **Đăng ký**, tạo tài khoản, sau đó đăng nhập. Đăng ký chỉ tạo
-tài khoản trong MySQL; người dùng cần đăng nhập riêng. Cookie phiên `HttpOnly`
-được lưu bằng session token ngẫu nhiên, database chỉ lưu hash token và thời
-hạn. Mật khẩu được hash bằng bcryptjs. Khi đăng xuất, session bị thu hồi ở
-backend.
+## Log tập trung và LogQL
 
-## 6. Tính năng
+Promtail đọc log JSON của Docker từ
+`/var/lib/docker/containers/*/*-json.log`, sau đó gửi vào Loki. Trên Docker
+Engine Linux, mở Grafana → **Explore** → datasource **Loki** và chạy:
 
-- Landing page tiếng Việt, trang đăng ký và đăng nhập.
-- Ảnh bàn làm việc không có người từ Unsplash được lưu tại
-  `frontend/public/images/task-workspace.jpg`; có ảnh SVG dự phòng.
-- Dashboard thống kê từ MySQL; danh sách công việc sắp đến hạn và mới cập nhật.
-- Lịch tháng/tuần/ngày, lọc trạng thái/ưu tiên và tạo task theo ngày chọn.
-- Biểu đồ cột/đường thống kê hoàn thành theo ngày/tháng/năm từ `completed_at`.
-- Hồ sơ cá nhân lưu avatar riêng trong MySQL, cập nhật tên và đổi mật khẩu có
-  xác minh; Admin có hồ sơ và khu vực quản trị riêng.
-- Quên/đặt lại mật khẩu qua email SMTP tùy chọn; không phát hành token khi
-  dịch vụ email chưa được cấu hình.
-- Nhật ký Admin ghi đăng nhập/đăng xuất cùng thay đổi vai trò/trạng thái; có
-  tìm kiếm, lọc và phân trang.
-- Tạo, xem chi tiết, sửa, đổi trạng thái và xóa công việc.
-- Tìm theo tiêu đề/mô tả; lọc trạng thái, ưu tiên, hạn; sắp xếp và phân trang
-  tại API.
-- Backend xác thực session, kiểm tra đầu vào, giới hạn quyền truy cập theo
-  `owner_id` và dùng truy vấn MySQL tham số hóa.
-- Dữ liệu nghiệp vụ được lưu MySQL; frontend không dùng localStorage làm
-  database.
-
-## 7. REST API
-
-| Phương thức | Đường dẫn | Quyền | Mô tả |
-| --- | --- | --- | --- |
-| GET | `/health` | Công khai | Liveness của backend |
-| POST | `/api/auth/register` | Công khai | Tạo tài khoản thường |
-| POST | `/api/auth/login` | Công khai | Xác thực và tạo phiên |
-| GET | `/api/auth/me` | Phiên hợp lệ | Thông tin tài khoản hiện tại |
-| POST | `/api/auth/logout` | Công khai, thu hồi cookie gửi kèm | Thu hồi session và xóa cookie |
-| POST | `/api/auth/forgot-password` | Công khai | Gửi hướng dẫn qua SMTP, không tiết lộ email có tài khoản hay không |
-| POST | `/api/auth/reset-password` | Công khai | Đặt mật khẩu bằng token một lần có thời hạn |
-| GET | `/api/tasks` | Phiên hợp lệ | Danh sách phân trang, tìm kiếm/lọc/sắp xếp |
-| GET | `/api/tasks/:id` | Phiên hợp lệ | Chi tiết công việc thuộc tài khoản |
-| POST | `/api/tasks` | Phiên hợp lệ | Tạo công việc với chủ sở hữu lấy từ session |
-| PUT | `/api/tasks/:id` | Phiên hợp lệ | Cập nhật công việc thuộc tài khoản |
-| PATCH | `/api/tasks/:id/status` | Phiên hợp lệ | Cập nhật trạng thái |
-| PATCH | `/api/tasks/:id` | Phiên hợp lệ | Cập nhật một phần trường được hỗ trợ |
-| DELETE | `/api/tasks/:id` | Phiên hợp lệ | Xóa công việc thuộc tài khoản |
-| GET | `/api/dashboard/stats` | Phiên hợp lệ | Thống kê, công việc sắp hạn và mới cập nhật |
-| GET | `/api/calendar?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD` | User/Admin | Công việc trong cửa sổ lịch (tối đa 42 ngày), lọc `status`, `priority` |
-| GET | `/api/progress/summary?from=...&to=...` | User/Admin | Tổng hợp hoàn thành, hôm nay, tháng này, tỷ lệ nhóm task tạo trong kỳ và so sánh kỳ trước |
-| GET | `/api/progress/completions?groupBy=day\|month\|year&from=...&to=...` | User/Admin | Chuỗi số lượng hoàn thành theo khoảng ngày |
-| GET, PATCH | `/api/profile` | User/Admin | Xem hồ sơ/thống kê, cập nhật tên; email và vai trò chỉ đọc |
-| GET, PUT | `/api/profile/avatar` | User/Admin | Đọc/tải ảnh PNG/JPEG riêng tư (tối đa 2 MB) |
-| PATCH | `/api/profile/password` | User/Admin | Đổi mật khẩu sau khi xác minh mật khẩu hiện tại; thu hồi các phiên khác |
-| GET | `/api/admin/stats` | Admin | Thống kê thành viên và công việc có chủ sở hữu |
-| GET | `/api/admin/users` | Admin | Tìm kiếm/lọc/phân trang thành viên; không trả password hash |
-| GET | `/api/admin/users/:id` | Admin | Chi tiết cơ bản và thống kê task của thành viên |
-| GET | `/api/admin/users/:id/tasks` | Admin | Task phân trang của một thành viên |
-| PATCH | `/api/admin/users/:id` | Admin | Cập nhật tên hiển thị và ghi nhật ký |
-| PATCH | `/api/admin/users/:id/status` | Admin | Kích hoạt/vô hiệu hóa; khóa sẽ thu hồi session |
-| PATCH | `/api/admin/users/:id/role` | Admin | Đổi vai trò; đăng ký công khai luôn tạo user |
-| GET | `/api/admin/tasks` | Admin | Danh sách task hệ thống có phân trang/lọc theo chủ sở hữu, trạng thái, ưu tiên và hạn |
-| GET | `/api/admin/activity` | Admin | Nhật ký đăng nhập/đăng xuất, cập nhật hồ sơ, đổi vai trò/trạng thái và sự kiện mẫu |
-
-`GET /api/tasks` nhận `page`, `pageSize` (tối đa 100), `search`, `status`,
-`priority`, `due` (`overdue`, `upcoming`, `none`), `sort` (`created`, `due`,
-`status`, `priority`) và `order` (`asc`, `desc`). Trạng thái trong database là
-`To do`, `In Progress`, `Done`; ưu tiên là `Low`, `Medium`, `High`.
-
-`PATCH /api/profile/password` nhận `currentPassword`, `newPassword` và
-`passwordConfirmation` trong JSON body. Mật khẩu mới cần tối thiểu 10 ký tự,
-chữ hoa, chữ thường, chữ số và tối đa 72 byte; xác minh mật khẩu hiện tại
-trước khi lưu hash bcrypt. Những session khác bị thu hồi, session hiện tại
-được giữ lại.
-
-Quên mật khẩu cần cấu hình `SMTP_HOST`, `SMTP_FROM` và tùy chọn `SMTP_PORT`
-(mặc định 587), `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`. Khi thiếu host
-hoặc from, API báo rõ email chưa được cấu hình và không tạo token/giả vờ gửi.
-Khi có SMTP, token ngẫu nhiên chỉ được lưu dạng hash trong
-`password_reset_tokens`, hết hạn sau 30 phút, dùng một lần và giới hạn tối đa
-ba yêu cầu mỗi email/IP trong 15 phút. Đặt mật khẩu lại sẽ thu hồi mọi phiên.
-SMTP credentials chỉ được cung cấp qua secrets của môi trường.
-
-`GET /api/admin/activity` nhận `page`, `limit` (tối đa 100), `search`,
-`action` (`user.status`, `user.role`, `user.profile`, `auth.login`, `auth.logout`, `demo.seed`),
-`adminId`, `from` và `to` (`YYYY-MM-DD`, bao gồm ngày kết thúc). API trả thông
-tin quản trị viên để điền bộ lọc cùng tổng số trang. Sự kiện `demo.seed` là dữ
-liệu minh họa được đánh dấu riêng, không đại diện cho thao tác quản trị thật.
-
-Calendar/progress không nhận `userId`: chủ sở hữu luôn lấy từ phiên đã xác thực.
-Progress date/time được ghi và nhóm theo UTC. Chỉ thao tác chuyển task sang
-`Done` mới tạo `completed_at`; mở lại task sẽ đặt lại trường này thành `NULL`.
-Tỷ lệ hoàn thành là phần trăm task được tạo trong kỳ đang có trạng thái `Done`;
-số hoàn thành trong khoảng là số task có `completed_at` trong khoảng đó.
-
-## 8. Dữ liệu demo và Admin
-
-### Ba tài khoản demo có lịch sử
-
-1. Dùng database development riêng, chạy `npm run db:init`.
-2. Trong `.env`, đặt:
-
-   ```dotenv
-   NODE_ENV=development
-   DEMO_SEED_ENABLED=true
-   DEMO_USER_PASSWORD=choose_a_private_password_at_least_16_chars
-   ```
-
-3. Chạy `npm run seed:demo`. Script tạo ba tài khoản user sau và 24 công việc
-   riêng cho mỗi người (72 công việc tổng cộng), với trạng thái/ưu tiên đa dạng,
-   việc quá hạn và ngày hoàn thành phân bố trong khoảng 5-6 tuần:
-
-   | Email | Tên hiển thị | Vai trò |
-   | --- | --- | --- |
-   | `user1@tasktracker.local` | Nguyễn Minh Anh | user |
-   | `user2@tasktracker.local` | Trần Hoàng Nam | user |
-   | `user3@tasktracker.local` | Lê Thu Hà | user |
-
-   Cả ba tài khoản dùng chung mật khẩu lấy từ `DEMO_USER_PASSWORD`; mật khẩu
-   được bcrypt hash và không in ra log. Tài khoản Admin có mật khẩu riêng.
-
-Seed idempotent qua `seed_key`, chạy trong một transaction và in số tài khoản/
-hoạt động mẫu mới so với đã có. Tám hoạt động quản trị minh họa được đánh dấu
-`Mẫu minh họa` và dùng khóa riêng để chạy lại không tạo trùng. Chạy lại không
-sửa mật khẩu, tên, quyền hay công việc hiện có. Nếu một email mẫu thuộc
-Admin/tài khoản bị khóa, seed dừng thay vì sửa nó. Không chạy trong production;
-script yêu cầu
-`NODE_ENV=development` hoặc `test` và `DEMO_SEED_ENABLED=true`.
-
-### Khởi tạo Admin
-
-Đặt thông tin riêng trong `.env` (không commit hoặc chia sẻ các giá trị này):
-
-```dotenv
-ADMIN_EMAIL=admin@tasktracker.local
-ADMIN_NAME=Quản trị viên
-ADMIN_PASSWORD=choose_a_unique_password_at_least_16_chars
+```logql
+{job="docker"}
+{job="docker"} |= "error"
+{job="docker"} |~ "(?i)(error|fail|exception)"
 ```
 
-Chạy thủ công `npm run admin:create` sau `npm run db:init`. Nếu email chưa có,
-lệnh tạo Admin với mật khẩu băm; nếu tài khoản đã tồn tại và đang hoạt động,
-chỉ cấp vai trò `admin`, không đổi password/profile. Không có Admin mặc định
-hoặc tự tạo lúc server khởi động. Với môi trường production, cấp quyền phải là
-một thao tác vận hành có chủ đích với biến môi trường bí mật.
+Nếu truy vấn chưa có dữ liệu, tạo traffic bằng cách mở website/đăng nhập, chờ
+Promtail scrape, rồi chọn khoảng thời gian phù hợp. Docker Desktop trên Windows
+chạy engine trong VM; nếu đường dẫn log không được mount bởi bản Docker Desktop
+đang dùng, kiểm tra trạng thái Promtail và phần log driver trong
+`docker compose logs promtail`. Việc thu thập log file phụ thuộc Docker engine
+cấu hình `json-file`.
 
-Admin có thể tìm/lọc/phân trang thành viên, xem task, cập nhật tên hiển thị,
-kích hoạt/vô hiệu hóa tài khoản và đổi role. Email và thông tin xác thực không
-được chỉnh sửa tại màn hình quản trị. Nhật ký hoạt động hỗ trợ lọc theo hành động/quản trị viên/
-khoảng ngày, tìm kiếm và phân trang; sự kiện seed được đánh dấu rõ là mẫu.
-Đăng nhập/đăng xuất Admin và thay đổi hồ sơ/quyền/trạng thái được ghi với mô tả và
-đối tượng tác động. Danh sách task hệ thống hỗ trợ lọc chủ sở hữu và công việc
-quá hạn. Vô hiệu hóa thu hồi session hiện có; lần gọi API tiếp theo
-nhận 401. Không thể tự hạ quyền/vô hiệu hóa Admin đang đăng nhập hoặc vô hiệu
-hóa/hạ quyền Admin cuối cùng. Thay đổi quyền/trạng thái chạy trong transaction,
-được tuần tự hóa qua `admin_guard` để tránh đồng thời vô hiệu hóa Admin cuối.
-Avatar được giới hạn PNG/JPEG, tối đa 2 MB, kiểm tra chữ ký/độ phân giải, lưu
-trong MySQL và chỉ đọc qua session đã xác thực. Email hồ sơ vẫn chỉ đọc vì chưa
-có quy tắc đổi email/xác minh địa chỉ mới. Xóa vĩnh viễn chưa được bật: khóa
-ngoại hiện cascade công việc/session khi xóa người dùng và chưa có chính sách
-lưu giữ dữ liệu.
+## Ứng dụng
 
-Các sự kiện được lưu trong `admin_activity`; migration thêm metadata loại/ID
-đối tượng, mô tả và `seed_key` duy nhất cho mẫu idempotent mà không xóa nhật
-ký cũ. Không có API xóa hàng loạt.
+- Đăng ký/đăng nhập, session cookie `HttpOnly` và `Secure` khi production,
+  đổi mật khẩu và đặt lại qua SMTP tùy chọn.
+- CRUD công việc, ngày bắt đầu/hạn, trạng thái, ưu tiên, người phụ trách,
+  tìm kiếm/lọc/phân trang.
+- Dashboard, lịch, thống kê tiến độ và hồ sơ cá nhân.
+- Phân quyền Admin, quản lý thành viên và nhật ký hoạt động.
+- Mỗi task được truy cập theo chủ sở hữu đã xác thực; mật khẩu hash bằng
+  bcrypt; truy vấn SQL tham số hóa.
 
-Để khởi tạo bộ tài khoản cục bộ: đặt `ADMIN_EMAIL`, `ADMIN_NAME`,
-`ADMIN_PASSWORD` trong `.env`, sau đó chạy `npm run admin:create`. Lệnh chỉ
-được gọi thủ công, không chạy cùng seed demo và không tự chạy khi server khởi
-động. Nếu email đã tồn tại và tài khoản đang hoạt động, script chỉ cấp quyền
-Admin mà không thay mật khẩu hoặc hồ sơ; xác nhận email trước khi chạy.
+Schema PostgreSQL đặt tại `database/schema.sql`; `npm run db:init` khởi tạo
+schema và `npm run db:check` kiểm tra kết nối khi chạy local.
 
-Để kiểm tra: đăng nhập từng email user ở trên bằng mật khẩu
-`DEMO_USER_PASSWORD`, kiểm tra mỗi tài khoản chỉ thấy công việc của mình rồi mở
-`/calendar` và `/progress`. Đăng xuất và đăng nhập
-`admin@tasktracker.local` bằng `ADMIN_PASSWORD` để mở `/admin`, `/admin/users`,
-`/admin/tasks`, `/admin/activity`. Gọi API Admin bằng tài khoản user phải nhận
-403.
+## Hardening đang áp dụng
 
-Ảnh không có người trên hero được lưu cục bộ tại
-`frontend/public/images/task-workspace.jpg`; biểu mẫu xác thực dùng ảnh desk
-và SVG hiện có làm ảnh dự phòng.
+1. API và Nginx chạy non-root; API không publish cổng trực tiếp.
+2. `cap_drop: ALL`, `no-new-privileges`, filesystem read-only và `/tmp` tạm
+   cho API/Nginx.
+3. Tách network database (internal), monitoring (internal), edge; chỉ Nginx
+   nhận truy cập web từ bên ngoài.
+4. Role PostgreSQL của ứng dụng không phải superuser; mật khẩu tách theo dịch
+   vụ, lưu trong `.env` không commit.
+5. PostgreSQL và Loki không publish port; giao diện pgAdmin/Grafana/Prometheus
+   bind loopback.
+6. Nginx TLS 1.2/1.3, chuyển HTTP sang HTTPS, security headers, ẩn phiên bản.
+   Chứng thư tự ký chỉ dành cho demo/local; thay bằng chứng thư tin cậy khi
+   triển khai thật.
+7. cAdvisor/Promtail có quyền đọc host metrics/logs cần thiết; đây là thành
+   phần giám sát có quyền cao hơn ứng dụng và được giới hạn mount chỉ đọc,
+   không publish cổng.
 
-## 9. Kiểm tra
+Stack này phục vụ bài tập/demo. Không dùng cấu hình mặc định hoặc chứng thư
+tự ký này làm cấu hình production công khai.
+
+## Kiểm thử và rà soát
 
 ```powershell
 npm test
 npm run lint
 npm run build
+npm run test:integration
 ```
 
-`npm run test:integration` chạy MySQL thật: xác thực, CRUD, calendar/progress,
-role Admin, phân trang, thu hồi session tài khoản bị khóa và audit log. Test
-tạo dữ liệu tạm duy nhất rồi xóa chúng trong khối dọn dẹp. Chỉ chạy khi `.env`
-đã cấu hình, MySQL đang chạy và đã thực hiện `npm run db:init`. Không coi unit
-test/build thay thế cho việc xác minh thao tác trực tiếp trên website.
+Test tích hợp yêu cầu `.env` trỏ tới PostgreSQL đã khởi tạo. Với Compose, API
+image có test suite và kết nối DB qua mạng nội bộ:
 
-## 10. Xử lý lỗi thường gặp
+```powershell
+docker compose run --rm --no-deps api node --test tests/postgres-integration.test.js
+```
 
-- **Connection refused:** khởi động MySQL Server, kiểm tra `DB_HOST` và
-  `DB_PORT`.
-- **Access denied:** kiểm tra `DB_USER`/`DB_PASSWORD` trong `.env`.
-- **Unknown database:** tạo database bằng Workbench, xác nhận `DB_NAME`.
-- **Thiếu cột/bảng:** chạy `npm run db:init`, xem lỗi và kiểm tra quyền DDL của
-  tài khoản MySQL.
-- **Không gọi được API:** kiểm tra backend ở cổng 3001, Vite proxy và
-  `VITE_BACKEND_URL`.
-- **CORS/phiên không hoạt động khi deploy:** đặt origin frontend chính xác
-  trong `CLIENT_ORIGIN`, dùng HTTPS nếu cookie `Secure`/cross-site cần thiết,
-  không cấu hình wildcard.
-- **Không thấy công việc cũ:** các bản ghi chưa có `owner_id` vẫn được giữ
-  nguyên nhưng không hiển thị cho tài khoản nào; cần phân quyền có chủ đích.
+Unit test và build không thay thế kiểm chứng từng giao diện demo.
+
+## Lệnh vận hành
+
+```powershell
+docker compose logs -f api nginx postgres
+docker compose logs -f prometheus grafana loki promtail
+docker compose restart api
+docker compose down
+```
+
+`docker compose down` giữ các volume dữ liệu. Lệnh
+`docker compose down -v` xóa vĩnh viễn database, dashboard và metrics; chỉ dùng
+khi đã sao lưu và thực sự muốn xóa dữ liệu.
+
+## Hạn chế và dữ liệu cũ
+
+Hệ thống trước đây dùng MySQL; schema mới là PostgreSQL và không tự chuyển dữ
+liệu MySQL cũ. Nếu cần giữ dữ liệu, sao lưu database cũ và thực hiện migration
+riêng có đối chiếu khóa, kiểu dữ liệu, timestamp và hash trước khi chuyển
+traffic. Không xóa database cũ cho đến khi đã xác minh dữ liệu mới.
+
+Stack cung cấp self-signed HTTPS và lưu log/metrics trên named volumes, chưa
+bao gồm backup tự động, chứng thư CA tin cậy, retention production hay cảnh báo
+Alertmanager.

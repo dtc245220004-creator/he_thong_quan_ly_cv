@@ -61,7 +61,7 @@ test('private task routes require a valid session', async () => {
   assert.equal(queryCount, 0)
 })
 
-test('GET /api/tasks applies owner scope, filters, sorting, and pagination in MySQL', async () => {
+test('GET /api/tasks applies owner scope, filters, sorting, and pagination', async () => {
   let listQuery
   const baseUrl = await startServer(authenticatedQuery(async (sql, values) => {
     if (sql.includes('COUNT(*) AS total')) return [{ total: 1 }]
@@ -81,7 +81,7 @@ test('GET /api/tasks applies owner scope, filters, sorting, and pagination in My
   })
   assert.match(listQuery.sql, /owner_id = \?/)
   assert.match(listQuery.sql, /status = \?/)
-  assert.match(listQuery.sql, /title LIKE \? OR description LIKE \?/)
+  assert.match(listQuery.sql, /title ILIKE \? OR description ILIKE \?/)
   assert.match(listQuery.sql, /ORDER BY due_date ASC/)
   assert.deepEqual(listQuery.values, [42, 'In Progress', '%plan%', '%plan%', 5, 5])
 })
@@ -90,7 +90,7 @@ test('GET /api/dashboard/stats aggregates only the authenticated owner data', as
   const baseUrl = await startServer(authenticatedQuery(async (sql, values) => {
     assert.deepEqual(values, [42])
     assert.match(sql, /owner_id = \?/)
-    if (sql.includes('SUM(status =')) {
+    if (sql.includes('COUNT(*) FILTER')) {
       return [{
         total: 3,
         todo: 1,
@@ -127,7 +127,7 @@ test('POST /api/tasks validates input and saves a task for the session owner', a
   const baseUrl = await startServer(authenticatedQuery(async (sql, values) => {
     if (sql.startsWith('INSERT INTO tasks')) {
       insertValues = values
-      return { insertId: 8 }
+      return [{ id: 8 }]
     }
     assert.match(sql, /WHERE id = \? AND owner_id = \?/)
     assert.deepEqual(values, [8, 42])
@@ -227,7 +227,7 @@ test('registration hashes passwords and never accepts a caller-supplied role', a
   let values
   const baseUrl = await startServer(async (sql, params) => {
     if (sql.startsWith('SELECT id FROM users')) return []
-    if (sql.startsWith('INSERT INTO users')) { values = params; return { insertId: 12 } }
+    if (sql.startsWith('INSERT INTO users')) { values = params; return [] }
     throw new Error(`Unexpected query: ${sql}`)
   })
   const response = await fetch(`${baseUrl}/api/auth/register`, {

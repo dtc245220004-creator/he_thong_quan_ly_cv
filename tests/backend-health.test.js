@@ -33,3 +33,12 @@ test('GET /health reports that the backend is running', async () => {
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { status: 'ok' })
 })
+
+test('GET /metrics exposes Prometheus metrics', async () => {
+  const response = await fetch(`${baseUrl}/metrics`)
+  const metrics = await response.text()
+
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type'), /text\/plain/)
+  assert.match(metrics, /# TYPE http_request_duration_seconds histogram/)
+})
