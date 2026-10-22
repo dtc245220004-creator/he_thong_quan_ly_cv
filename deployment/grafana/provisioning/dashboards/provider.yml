@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Task Tracker
+    orgId: 1
+    folder: Task Tracker
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards
