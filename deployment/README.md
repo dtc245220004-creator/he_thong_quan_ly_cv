@@ -28,6 +28,10 @@ do not expose their internal endpoints.
 
 The `database`, `monitoring` networks are internal; PostgreSQL, Loki and API
 have no published host ports. pgAdmin, Prometheus and Grafana bind only to
-loopback. Use `docker compose down` to stop services without removing stored
-data. `docker compose down -v` is destructive and removes persisted database,
-dashboard, logs and metrics.
+loopback. The Docker socket proxy needs a writable root filesystem to generate
+its HAProxy configuration at startup; its Docker socket is mounted read-only,
+and its Docker API access is restricted to read-only discovery of containers,
+events, networks, ping and version (`POST` remains disabled). It drops all
+Linux capabilities, and its network is internal. Use `docker compose down` to
+stop services without removing stored data. `docker compose down -v` is
+destructive and removes persisted database, dashboard, logs and metrics.

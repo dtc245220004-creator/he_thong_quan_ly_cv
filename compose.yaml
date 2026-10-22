@@ -108,7 +108,7 @@ services:
       PGADMIN_CONFIG_SERVER_MODE: "True"
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "True"
     ports:
-      - "5050:80"
+      - "127.0.0.1:5050:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
@@ -186,6 +186,8 @@ services:
 
   promtail:
     image: grafana/promtail:3.1.1
+    environment:
+      DOCKER_API_VERSION: "1.44"
     command: ["-config.file=/etc/promtail/config.yml"]
     user: "0:0"
     volumes:
@@ -258,6 +260,7 @@ services:
     environment:
       CONTAINERS: "1"
       EVENTS: "1"
+      NETWORKS: "1"
       PING: "1"
       VERSION: "1"
       POST: "0"
@@ -266,7 +269,6 @@ services:
     networks:
       - docker-api
     restart: unless-stopped
-    read_only: true
     cap_drop:
       - ALL
     security_opt:

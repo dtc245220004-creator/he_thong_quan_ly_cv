@@ -32,7 +32,8 @@ chỉ bind trên `127.0.0.1`; website đi qua Nginx.
 
 ## Yêu cầu chạy
 
-- Docker Desktop với Linux containers (Windows/macOS) hoặc Docker Engine.
+- Docker Desktop với Linux containers (Windows/macOS) hoặc Docker Engine có
+  hỗ trợ Docker API v1.44 trở lên.
 - Docker Compose v2 (`docker compose`).
 - Cổng 80, 443, 3000, 5050 và 9090 chưa bị ứng dụng khác chiếm dụng.
 - RAM nên từ 4 GB vì stack có PostgreSQL, Grafana, Prometheus, Loki và
@@ -133,7 +134,8 @@ hoặc metrics exporter khỏe mới hiện dữ liệu.
 
 ## Log tập trung và LogQL
 
-Promtail đọc log JSON của Docker từ
+Promtail dùng Docker API v1.44 để khám phá container trên các Docker Engine
+hiện hành, rồi đọc log JSON của Docker từ
 `/var/lib/docker/containers/*/*-json.log`, sau đó gửi vào Loki. Trên Docker
 Engine Linux, mở Grafana → **Explore** → datasource **Loki** và chạy:
 
