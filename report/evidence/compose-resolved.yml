@@ -1,0 +1,422 @@
+name: task-tracker
+services:
+  api:
+    build:
+      context: /home/chi-htpm/he_thong_quan_ly_cv
+      dockerfile: backend/Dockerfile
+    cap_drop:
+      - ALL
+    command:
+      - sh
+      - -c
+      - node backend/src/init-db.js && node backend/src/server.js
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      CLIENT_ORIGIN: https://localhost
+      DB_HOST: postgres
+      DB_NAME: task_tracker
+      DB_PASSWORD: replace_with_a_unique_strong_application_password
+      DB_PORT: "5432"
+      DB_USER: task_tracker
+      NODE_ENV: production
+      PORT: "3001"
+      SESSION_COOKIE_SAME_SITE: Lax
+      TZ: UTC
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 20s
+    networks:
+      database: null
+      monitoring: null
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    user: 1000:1000
+  cadvisor:
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --allow_dynamic_housekeeping=false
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    networks:
+      monitoring: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: /
+        target: /rootfs
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /var/run
+        target: /var/run
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /sys
+        target: /sys
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /var/lib/docker/
+        target: /var/lib/docker
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /dev/disk/
+        target: /dev/disk
+        read_only: true
+        bind:
+          create_host_path: true
+  docker-socket-proxy:
+    cap_drop:
+      - ALL
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      PING: "1"
+      POST: "0"
+      VERSION: "1"
+    image: tecnativa/docker-socket-proxy:0.3.0
+    networks:
+      docker-api: null
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: true
+  grafana:
+    depends_on:
+      loki:
+        condition: service_started
+        required: true
+      prometheus:
+        condition: service_started
+        required: true
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: Admin@123456
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SERVER_ROOT_URL: https://localhost/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    image: grafana/grafana:11.2.0
+    networks:
+      monitoring: null
+    ports:
+      - mode: ingress
+        host_ip: 127.0.0.1
+        target: 3000
+        published: "3000"
+        protocol: tcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: grafana_data
+        target: /var/lib/grafana
+        volume: {}
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/grafana/dashboards
+        target: /var/lib/grafana/dashboards
+        read_only: true
+        bind:
+          create_host_path: true
+  loki:
+    command:
+      - -config.file=/etc/loki/config.yml
+    image: grafana/loki:3.1.1
+    networks:
+      monitoring: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/loki/config.yml
+        target: /etc/loki/config.yml
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: volume
+        source: loki_data
+        target: /loki
+        volume: {}
+  nginx:
+    build:
+      context: /home/chi-htpm/he_thong_quan_ly_cv
+      dockerfile: deployment/nginx/Dockerfile
+    cap_drop:
+      - ALL
+    depends_on:
+      api:
+        condition: service_healthy
+        required: true
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8081/nginx_status
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 10s
+    networks:
+      edge: null
+      monitoring: null
+    ports:
+      - mode: ingress
+        target: 8080
+        published: "80"
+        protocol: tcp
+      - mode: ingress
+        target: 8443
+        published: "443"
+        protocol: tcp
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    user: 101:101
+    volumes:
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/nginx/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: true
+  nginx-exporter:
+    command:
+      - --nginx.scrape-uri=http://nginx:8081/nginx_status
+    depends_on:
+      nginx:
+        condition: service_started
+        required: true
+    image: nginx/nginx-prometheus-exporter:1.3.0
+    networks:
+      edge: null
+      monitoring: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+  pgadmin:
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "True"
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: "123456"
+    image: dpage/pgadmin4:8
+    networks:
+      database: null
+      edge: null
+    ports:
+      - mode: ingress
+        target: 80
+        published: "5050"
+        protocol: tcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: pgadmin_data
+        target: /var/lib/pgadmin
+        volume: {}
+  postgres:
+    environment:
+      APP_DB_MONITOR_PASSWORD: replace_with_a_unique_strong_metrics_password
+      APP_DB_MONITOR_USER: task_tracker_monitor
+      APP_DB_NAME: task_tracker
+      APP_DB_PASSWORD: replace_with_a_unique_strong_application_password
+      APP_DB_USER: task_tracker
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: replace_with_a_different_strong_database_admin_password
+      POSTGRES_USER: postgres
+      TZ: UTC
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d postgres
+      timeout: 5s
+      interval: 10s
+      retries: 10
+      start_period: 15s
+    image: postgres:16-alpine
+    networks:
+      database: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+        volume: {}
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/postgres-init.sh
+        target: /docker-entrypoint-initdb.d/10-create-app-user.sh
+        read_only: true
+        bind:
+          create_host_path: true
+  postgres-exporter:
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      DATA_SOURCE_PASS: replace_with_a_unique_strong_metrics_password
+      DATA_SOURCE_URI: postgres:5432/task_tracker?sslmode=disable
+      DATA_SOURCE_USER: task_tracker_monitor
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    networks:
+      database: null
+      monitoring: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    depends_on:
+      api:
+        condition: service_healthy
+        required: true
+      cadvisor:
+        condition: service_started
+        required: true
+      nginx-exporter:
+        condition: service_started
+        required: true
+      postgres-exporter:
+        condition: service_started
+        required: true
+    image: prom/prometheus:v2.54.1
+    networks:
+      edge: null
+      monitoring: null
+    ports:
+      - mode: ingress
+        host_ip: 127.0.0.1
+        target: 9090
+        published: "9090"
+        protocol: tcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/prometheus/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: volume
+        source: prometheus_data
+        target: /prometheus
+        volume: {}
+  promtail:
+    cap_drop:
+      - ALL
+    command:
+      - -config.file=/etc/promtail/config.yml
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+        required: true
+      loki:
+        condition: service_started
+        required: true
+    image: grafana/promtail:3.1.1
+    networks:
+      docker-api: null
+      monitoring: null
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "0:0"
+    volumes:
+      - type: bind
+        source: /home/chi-htpm/he_thong_quan_ly_cv/deployment/promtail/config.yml
+        target: /etc/promtail/config.yml
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /var/lib/docker/containers
+        target: /var/lib/docker/containers
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: volume
+        source: promtail_positions
+        target: /tmp
+        volume: {}
+networks:
+  database:
+    name: task-tracker_database
+    internal: true
+  docker-api:
+    name: task-tracker_docker-api
+    internal: true
+  edge:
+    name: task-tracker_edge
+  monitoring:
+    name: task-tracker_monitoring
+    internal: true
+volumes:
+  grafana_data:
+    name: task-tracker_grafana_data
+  loki_data:
+    name: task-tracker_loki_data
+  pgadmin_data:
+    name: task-tracker_pgadmin_data
+  postgres_data:
+    name: task-tracker_postgres_data
+  prometheus_data:
+    name: task-tracker_prometheus_data
+  promtail_positions:
+    name: task-tracker_promtail_positions

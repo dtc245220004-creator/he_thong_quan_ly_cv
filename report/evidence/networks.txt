@@ -1,0 +1,8 @@
+NETWORK ID     NAME                      DRIVER    SCOPE
+4fcb2758a978   bridge                    bridge    local
+43e65121a12d   host                      host      local
+0bcc88721e31   none                      null      local
+ec85f9591244   task-tracker_database     bridge    local
+c8288ad713f2   task-tracker_docker-api   bridge    local
+955076503d8b   task-tracker_edge         bridge    local
+92a111b721fe   task-tracker_monitoring   bridge    local
