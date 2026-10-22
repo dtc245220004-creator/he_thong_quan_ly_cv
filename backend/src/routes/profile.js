@@ -8,16 +8,16 @@ export function createProfileRouter(db) {
   router.get('/', async (request, response) => {
     const [profile] = await db.query(
       `SELECT id, name, email, role, created_at,
-              CAST(UNIX_TIMESTAMP(avatar_updated_at) * 1000 AS UNSIGNED) AS avatarVersion
-       FROM users WHERE id = ? AND is_active = 1 LIMIT 1`,
+              (EXTRACT(EPOCH FROM avatar_updated_at) * 1000)::BIGINT AS "avatarVersion"
+       FROM users WHERE id = ? AND is_active LIMIT 1`,
       [request.user.id],
     )
     if (!profile) throw requestError(404, 'Không tìm thấy tài khoản.')
     const [stats] = await db.query(
       `SELECT COUNT(*) AS total,
-              SUM(status = 'Done') AS completed,
-              SUM(status = 'In Progress') AS inProgress,
-              SUM(status = 'To do') AS todo
+              COUNT(*) FILTER (WHERE status = 'Done') AS completed,
+              COUNT(*) FILTER (WHERE status = 'In Progress') AS "inProgress",
+              COUNT(*) FILTER (WHERE status = 'To do') AS todo
        FROM tasks WHERE owner_id = ?`,
       [request.user.id],
     )
@@ -38,10 +38,10 @@ export function createProfileRouter(db) {
     if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 120) {
       throw requestError(400, 'Họ tên phải có từ 2 đến 120 ký tự.')
     }
-    await db.query('UPDATE users SET name = ? WHERE id = ? AND is_active = 1', [name.trim(), request.user.id])
+    await db.query('UPDATE users SET name = ? WHERE id = ? AND is_active', [name.trim(), request.user.id])
     const [profile] = await db.query(
       `SELECT id, name, email, role, created_at,
-              CAST(UNIX_TIMESTAMP(avatar_updated_at) * 1000 AS UNSIGNED) AS avatarVersion
+              (EXTRACT(EPOCH FROM avatar_updated_at) * 1000)::BIGINT AS "avatarVersion"
        FROM users WHERE id = ? LIMIT 1`,
       [request.user.id],
     )
@@ -55,11 +55,11 @@ export function createProfileRouter(db) {
       throw requestError(400, 'Chỉ chấp nhận ảnh PNG hoặc JPEG hợp lệ, tối đa 2 MB.')
     }
     await db.query(
-      'UPDATE users SET avatar_mime = ?, avatar_data = ?, avatar_updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND is_active = 1',
+      'UPDATE users SET avatar_mime = ?, avatar_data = ?, avatar_updated_at = CURRENT_TIMESTAMP WHERE id = ? AND is_active',
       [mime, image, request.user.id],
     )
     const [profile] = await db.query(
-      'SELECT CAST(UNIX_TIMESTAMP(avatar_updated_at) * 1000 AS UNSIGNED) AS avatarVersion FROM users WHERE id = ?',
+      'SELECT (EXTRACT(EPOCH FROM avatar_updated_at) * 1000)::BIGINT AS "avatarVersion" FROM users WHERE id = ?',
       [request.user.id],
     )
     response.json(profile)
@@ -67,7 +67,7 @@ export function createProfileRouter(db) {
 
   router.get('/avatar', async (request, response) => {
     const [profile] = await db.query(
-      'SELECT avatar_mime AS mime, avatar_data AS image FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
+      'SELECT avatar_mime AS mime, avatar_data AS image FROM users WHERE id = ? AND is_active LIMIT 1',
       [request.user.id],
     )
     if (!profile?.image || !['image/png', 'image/jpeg'].includes(profile.mime)) {
@@ -103,14 +103,14 @@ export function createProfileRouter(db) {
       throw requestError(400, 'Mật khẩu xác nhận không khớp.')
     }
     const [user] = await db.query(
-      'SELECT password_hash FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
+      'SELECT password_hash FROM users WHERE id = ? AND is_active LIMIT 1',
       [request.user.id],
     )
     if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
       throw requestError(401, 'Mật khẩu hiện tại không chính xác.')
     }
     const passwordHash = await bcrypt.hash(newPassword, 12)
-    await db.query('UPDATE users SET password_hash = ? WHERE id = ? AND is_active = 1', [passwordHash, request.user.id])
+    await db.query('UPDATE users SET password_hash = ? WHERE id = ? AND is_active', [passwordHash, request.user.id])
     if (request.user.sessionId) {
       await db.query('DELETE FROM auth_sessions WHERE user_id = ? AND id <> ?', [request.user.id, request.user.sessionId])
     }

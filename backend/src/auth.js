@@ -84,10 +84,10 @@ export async function requireAuth(db, request, _response, next) {
     }
 
     const rows = await db.query(
-      `SELECT u.id, u.name, u.email, u.role, s.id AS sessionId
+      `SELECT u.id, u.name, u.email, u.role, s.id AS "sessionId"
        FROM auth_sessions s
        JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_active = 1
+       WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_active
        LIMIT 1`,
       [sessionHash(token)],
     )
@@ -154,7 +154,7 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
         [name.trim(), normalizedEmail, passwordHash, 'user'],
       )
     } catch (error) {
-      if (error.code === 'ER_DUP_ENTRY') throw requestError(409, 'Email này đã được đăng ký.')
+      if (error.code === '23505') throw requestError(409, 'Email này đã được đăng ký.')
       throw error
     }
 
@@ -171,8 +171,8 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
 
     const rows = await db.query(
       `SELECT id, name, email, password_hash, role,
-              CAST(UNIX_TIMESTAMP(avatar_updated_at) * 1000 AS UNSIGNED) AS avatar_version
-       FROM users WHERE email = ? AND is_active = 1 LIMIT 1`,
+              (EXTRACT(EPOCH FROM avatar_updated_at) * 1000)::BIGINT AS avatar_version
+       FROM users WHERE email = ? AND is_active LIMIT 1`,
       [email],
     )
     const user = rows[0]
@@ -221,7 +221,7 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
     const requestIpHash = sessionHash(request.ip || 'unknown')
     const [recentRequests] = await db.query(
       `SELECT COUNT(*) AS total FROM password_reset_tokens
-       WHERE requested_at > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 15 MINUTE)
+       WHERE requested_at > CURRENT_TIMESTAMP - INTERVAL '15 minutes'
          AND (email_hash = ? OR request_ip_hash = ?)`,
       [emailHash, requestIpHash],
     )
@@ -230,7 +230,7 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
     }
 
     const [account] = await db.query(
-      'SELECT id, name, email FROM users WHERE email = ? AND is_active = 1 LIMIT 1',
+      'SELECT id, name, email FROM users WHERE email = ? AND is_active LIMIT 1',
       [email],
     )
     const token = account ? randomBytes(32).toString('base64url') : null
@@ -300,7 +300,7 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
         throw requestError(400, 'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.')
       }
       await tx.query(
-        'UPDATE users SET password_hash = ? WHERE id = ? AND is_active = 1',
+        'UPDATE users SET password_hash = ? WHERE id = ? AND is_active',
         [passwordHash, resetRequest.user_id],
       )
       await tx.query(
@@ -320,10 +320,10 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
     }
     const rows = await db.query(
       `SELECT u.id, u.name, u.email, u.role,
-              CAST(UNIX_TIMESTAMP(u.avatar_updated_at) * 1000 AS UNSIGNED) AS avatarVersion
+              (EXTRACT(EPOCH FROM u.avatar_updated_at) * 1000)::BIGINT AS "avatarVersion"
        FROM auth_sessions s
        JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_active = 1
+       WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_active
        LIMIT 1`,
       [sessionHash(token)],
     )
@@ -337,7 +337,7 @@ export function createAuthRouter(db, transaction = (callback) => callback(db)) {
       const [admin] = await db.query(
         `SELECT u.id FROM auth_sessions s
          JOIN users u ON u.id = s.user_id
-         WHERE s.token_hash = ? AND u.role = 'admin' AND u.is_active = 1 LIMIT 1`,
+         WHERE s.token_hash = ? AND u.role = 'admin' AND u.is_active LIMIT 1`,
         [sessionHash(token)],
       )
       if (admin) {

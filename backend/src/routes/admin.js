@@ -9,16 +9,16 @@ export function createAdminRouter(db, transaction) {
 
   router.get('/stats', async (_request, response) => {
     const [users] = await db.query(
-      `SELECT COUNT(*) AS totalUsers,
-              SUM(is_active = 1) AS activeUsers,
-              SUM(is_active = 0) AS inactiveUsers
+      `SELECT COUNT(*) AS "totalUsers",
+              COUNT(*) FILTER (WHERE is_active) AS "activeUsers",
+              COUNT(*) FILTER (WHERE NOT is_active) AS "inactiveUsers"
        FROM users`,
     )
     const [tasks] = await db.query(
-      `SELECT COUNT(*) AS totalTasks,
-              SUM(status = 'Done') AS completed,
-              SUM(status = 'In Progress') AS inProgress,
-              SUM(status = 'To do') AS todo
+      `SELECT COUNT(*) AS "totalTasks",
+              COUNT(*) FILTER (WHERE status = 'Done') AS completed,
+              COUNT(*) FILTER (WHERE status = 'In Progress') AS "inProgress",
+              COUNT(*) FILTER (WHERE status = 'To do') AS todo
        FROM tasks WHERE owner_id IS NOT NULL`,
     )
     const recentUsers = await db.query(
@@ -26,8 +26,8 @@ export function createAdminRouter(db, transaction) {
     )
     const recentActivity = await db.query(
       `SELECT a.id, a.action, a.description, a.created_at,
-              actor.name AS actorName, actor.email AS actorEmail,
-              target.id AS targetId, target.name AS targetName, target.email AS targetEmail
+              actor.name AS "actorName", actor.email AS "actorEmail",
+              target.id AS "targetId", target.name AS "targetName", target.email AS "targetEmail"
        FROM admin_activity a
        JOIN users actor ON actor.id = a.actor_id
        LEFT JOIN users target ON target.id = a.target_user_id
@@ -54,17 +54,17 @@ export function createAdminRouter(db, transaction) {
     const conditions = []
     const values = []
     if (role) { conditions.push('u.role = ?'); values.push(role) }
-    if (status) { conditions.push('u.is_active = ?'); values.push(status === 'active' ? 1 : 0) }
+    if (status) { conditions.push('u.is_active = ?'); values.push(status === 'active') }
     if (typeof search === 'string' && search.trim()) {
-      conditions.push('(u.name LIKE ? OR u.email LIKE ?)')
+      conditions.push('(u.name ILIKE ? OR u.email ILIKE ?)')
       values.push(`%${search.trim().slice(0, 120)}%`, `%${search.trim().slice(0, 120)}%`)
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
     const [count] = await db.query(`SELECT COUNT(*) AS total FROM users u ${where}`, values)
     const items = await db.query(
       `SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_at,
-              COUNT(t.id) AS taskCount,
-              SUM(t.status = 'Done') AS completedTaskCount
+              COUNT(t.id) AS "taskCount",
+              COUNT(t.id) FILTER (WHERE t.status = 'Done') AS "completedTaskCount"
        FROM users u LEFT JOIN tasks t ON t.owner_id = u.id
        ${where}
        GROUP BY u.id
@@ -105,8 +105,8 @@ export function createAdminRouter(db, transaction) {
     const userId = parsePositiveId(request.params.id, 'ID thành viên')
     const [user] = await db.query(
       `SELECT ${userFields},
-              (SELECT COUNT(*) FROM tasks WHERE owner_id = users.id) AS taskCount,
-              (SELECT COUNT(*) FROM tasks WHERE owner_id = users.id AND status = 'Done') AS completedTaskCount
+              (SELECT COUNT(*) FROM tasks WHERE owner_id = users.id) AS "taskCount",
+              (SELECT COUNT(*) FROM tasks WHERE owner_id = users.id AND status = 'Done') AS "completedTaskCount"
        FROM users WHERE id = ? LIMIT 1`,
       [userId],
     )
@@ -158,10 +158,10 @@ export function createAdminRouter(db, transaction) {
       const [target] = await tx.query('SELECT id, role, is_active FROM users WHERE id = ? LIMIT 1', [userId])
       if (!target) throw requestError(404, 'Không tìm thấy thành viên.')
       if (!isActive && target.role === 'admin' && target.is_active) {
-        const [count] = await tx.query('SELECT COUNT(*) AS total FROM users WHERE role = ? AND is_active = 1', ['admin'])
+        const [count] = await tx.query('SELECT COUNT(*) AS total FROM users WHERE role = ? AND is_active', ['admin'])
         if (Number(count.total) <= 1) throw requestError(409, 'Không thể vô hiệu hóa Admin cuối cùng.')
       }
-      await tx.query('UPDATE users SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, userId])
+      await tx.query('UPDATE users SET is_active = ? WHERE id = ?', [isActive, userId])
       if (!isActive) await tx.query('DELETE FROM auth_sessions WHERE user_id = ?', [userId])
       await recordActivity(
         tx,
@@ -190,7 +190,7 @@ export function createAdminRouter(db, transaction) {
       const [target] = await tx.query('SELECT id, role, is_active FROM users WHERE id = ? LIMIT 1', [userId])
       if (!target) throw requestError(404, 'Không tìm thấy thành viên.')
       if (role !== 'admin' && target.role === 'admin' && target.is_active) {
-        const [count] = await tx.query('SELECT COUNT(*) AS total FROM users WHERE role = ? AND is_active = 1', ['admin'])
+        const [count] = await tx.query('SELECT COUNT(*) AS total FROM users WHERE role = ? AND is_active', ['admin'])
         if (Number(count.total) <= 1) throw requestError(409, 'Không thể hạ quyền Admin cuối cùng.')
       }
       await tx.query('UPDATE users SET role = ? WHERE id = ?', [role, userId])
@@ -232,7 +232,7 @@ export function createAdminRouter(db, transaction) {
       values.push(priority)
     }
     if (typeof search === 'string' && search.trim()) {
-      conditions.push('(t.title LIKE ? OR t.description LIKE ? OR u.email LIKE ?)')
+      conditions.push('(t.title ILIKE ? OR t.description ILIKE ? OR u.email ILIKE ?)')
       const pattern = `%${search.trim().slice(0, 120)}%`
       values.push(pattern, pattern, pattern)
     }
@@ -241,7 +241,7 @@ export function createAdminRouter(db, transaction) {
     const items = await db.query(
       `SELECT t.id, t.title, t.status, t.priority, t.due_date, t.completed_at, t.updated_at,
               t.created_at,
-              u.id AS ownerId, u.name AS ownerName, u.email AS ownerEmail
+              u.id AS "ownerId", u.name AS "ownerName", u.email AS "ownerEmail"
        FROM tasks t JOIN users u ON u.id = t.owner_id WHERE ${where}
        ORDER BY t.updated_at DESC, t.id DESC LIMIT ? OFFSET ?`,
       [...values, limit, (page - 1) * limit],
@@ -269,9 +269,9 @@ export function createAdminRouter(db, transaction) {
     if (action) { conditions.push('a.action = ?'); values.push(action) }
     if (adminId) { conditions.push('a.actor_id = ?'); values.push(parsePositiveId(adminId, 'ID quản trị viên')) }
     if (from) { conditions.push('a.created_at >= ?'); values.push(`${from} 00:00:00`) }
-    if (to) { conditions.push('a.created_at < DATE_ADD(?, INTERVAL 1 DAY)'); values.push(`${to} 00:00:00`) }
+    if (to) { conditions.push("a.created_at < (?::date + INTERVAL '1 day')"); values.push(to) }
     if (typeof search === 'string' && search.trim()) {
-      conditions.push('(a.description LIKE ? OR a.action LIKE ? OR actor.name LIKE ? OR actor.email LIKE ? OR target.name LIKE ? OR target.email LIKE ?)')
+      conditions.push('(a.description ILIKE ? OR a.action ILIKE ? OR actor.name ILIKE ? OR actor.email ILIKE ? OR target.name ILIKE ? OR target.email ILIKE ?)')
       const pattern = `%${search.trim().slice(0, 120)}%`
       values.push(pattern, pattern, pattern, pattern, pattern, pattern)
     }
@@ -284,10 +284,10 @@ export function createAdminRouter(db, transaction) {
       values,
     )
     const items = await db.query(
-      `SELECT a.id, a.action, a.description, a.details, a.target_type AS targetType,
-              a.target_id AS targetId, a.seed_key AS seedKey, a.created_at,
-              actor.id AS actorId, actor.name AS actorName, actor.email AS actorEmail,
-              target.id AS targetUserId, target.name AS targetName, target.email AS targetEmail
+      `SELECT a.id, a.action, a.description, a.details, a.target_type AS "targetType",
+              a.target_id AS "targetId", a.seed_key AS "seedKey", a.created_at,
+              actor.id AS "actorId", actor.name AS "actorName", actor.email AS "actorEmail",
+              target.id AS "targetUserId", target.name AS "targetName", target.email AS "targetEmail"
        FROM admin_activity a
        JOIN users actor ON actor.id = a.actor_id
        LEFT JOIN users target ON target.id = a.target_user_id
@@ -315,7 +315,7 @@ function recordActivity(db, actorId, targetUserId, action, details, description)
 
 async function assertActiveAdmin(db, userId) {
   const [actor] = await db.query(
-    'SELECT id FROM users WHERE id = ? AND role = ? AND is_active = 1 LIMIT 1 FOR UPDATE',
+    'SELECT id FROM users WHERE id = ? AND role = ? AND is_active LIMIT 1 FOR UPDATE',
     [userId, 'admin'],
   )
   if (!actor) throw requestError(403, 'Quyền quản trị không còn hiệu lực.')

@@ -115,7 +115,7 @@ export function createTasksRouter(db) {
     if (status) { where.push('status = ?'); values.push(status) }
     if (priority) { where.push('priority = ?'); values.push(priority) }
     if (typeof search === 'string' && search.trim()) {
-      where.push('(title LIKE ? OR description LIKE ?)')
+      where.push('(title ILIKE ? OR description ILIKE ?)')
       values.push(`%${search.trim().slice(0, 120)}%`, `%${search.trim().slice(0, 120)}%`)
     }
     if (due === 'overdue') where.push("due_date < CURRENT_DATE AND status <> 'Done'")
@@ -152,10 +152,11 @@ export function createTasksRouter(db) {
     ]
     const result = await db.query(
       `INSERT INTO tasks (title, description, start_date, due_date, status, priority, assignee, owner_id, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, IF(? = 'Done', UTC_TIMESTAMP(), NULL))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'Done' THEN CURRENT_TIMESTAMP ELSE NULL END)
+       RETURNING id`,
       [...values, task.status ?? 'To do'],
     )
-    const rows = await taskById(db, result.insertId, request.user.id)
+    const rows = await taskById(db, result[0].id, request.user.id)
     response.status(201).json(rows[0])
   })
 
@@ -192,14 +193,15 @@ export function createTasksRouter(db) {
     const result = await db.query(
       `UPDATE tasks
        SET completed_at = CASE
-             WHEN ? = 'Done' THEN COALESCE(completed_at, UTC_TIMESTAMP())
+             WHEN ? = 'Done' THEN COALESCE(completed_at, CURRENT_TIMESTAMP)
              ELSE NULL
            END,
            status = ?
-       WHERE id = ? AND owner_id = ?`,
+       WHERE id = ? AND owner_id = ?
+       RETURNING id`,
       [status, status, id, request.user.id],
     )
-    if (!result.affectedRows) throw createRequestError(404, 'Không tìm thấy công việc.')
+    if (!result.length) throw createRequestError(404, 'Không tìm thấy công việc.')
     const rows = await taskById(db, id, request.user.id)
     response.json(rows[0])
   })
@@ -221,7 +223,7 @@ export function createTasksRouter(db) {
           : null
         : existing[0].completed_at
       await db.query(
-        `UPDATE tasks SET ${fields.map((field) => `\`${field}\` = ?`).join(', ')}, completed_at = ?
+        `UPDATE tasks SET ${fields.map((field) => `"${field}" = ?`).join(', ')}, completed_at = ?
          WHERE id = ? AND owner_id = ?`,
         [...fields.map((field) => task[field]), completionTime, id, request.user.id],
       )
@@ -232,10 +234,10 @@ export function createTasksRouter(db) {
 
   router.delete('/:id', async (request, response) => {
     const result = await db.query(
-      'DELETE FROM tasks WHERE id = ? AND owner_id = ?',
+      'DELETE FROM tasks WHERE id = ? AND owner_id = ? RETURNING id',
       [parseTaskId(request.params.id), request.user.id],
     )
-    if (!result.affectedRows) throw createRequestError(404, 'Không tìm thấy công việc.')
+    if (!result.length) throw createRequestError(404, 'Không tìm thấy công việc.')
     response.status(204).end()
   })
   return router

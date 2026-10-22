@@ -2,7 +2,7 @@
   "name": "task-tracker",
   "version": "1.0.0",
   "private": true,
-  "description": "Starter project for a Task Tracker learning project",
+  "description": "Task Tracker application and Docker Compose observability stack",
   "type": "module",
   "workspaces": [
     "frontend",
@@ -18,8 +18,8 @@
     "db:init": "node --env-file-if-exists=.env backend/src/init-db.js",
     "seed:demo": "node --env-file-if-exists=.env backend/src/seed-demo.js",
     "admin:create": "node --env-file-if-exists=.env backend/src/create-admin.js",
-    "test": "node --test tests/backend-health.test.js tests/tasks-api.test.js",
-    "test:integration": "node --env-file-if-exists=.env --test tests/mysql-integration.test.js"
+    "test": "node --test tests/backend-health.test.js tests/postgres-db.test.js tests/tasks-api.test.js",
+    "test:integration": "node --env-file-if-exists=.env --test tests/postgres-integration.test.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

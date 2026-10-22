@@ -8,13 +8,13 @@ export function createDashboardRouter(db) {
     const [counts] = await db.query(
       `SELECT
          COUNT(*) AS total,
-         SUM(status = 'To do') AS todo,
-         SUM(status = 'In Progress') AS inProgress,
-         SUM(status = 'Done') AS completed,
-         SUM(due_date < CURRENT_DATE AND status <> 'Done') AS overdue,
-         SUM(priority = 'High') AS highPriority,
-         SUM(priority = 'Medium') AS mediumPriority,
-         SUM(priority = 'Low') AS lowPriority
+         COUNT(*) FILTER (WHERE status = 'To do') AS todo,
+         COUNT(*) FILTER (WHERE status = 'In Progress') AS "inProgress",
+         COUNT(*) FILTER (WHERE status = 'Done') AS completed,
+         COUNT(*) FILTER (WHERE due_date < CURRENT_DATE AND status <> 'Done') AS overdue,
+         COUNT(*) FILTER (WHERE priority = 'High') AS "highPriority",
+         COUNT(*) FILTER (WHERE priority = 'Medium') AS "mediumPriority",
+         COUNT(*) FILTER (WHERE priority = 'Low') AS "lowPriority"
        FROM tasks WHERE owner_id = ?`,
       [ownerId],
     )

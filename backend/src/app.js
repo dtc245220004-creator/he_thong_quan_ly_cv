@@ -7,6 +7,7 @@ import { createCalendarRouter } from './routes/calendar.js'
 import { createProgressRouter } from './routes/progress.js'
 import { createProfileRouter } from './routes/profile.js'
 import { createAdminRouter } from './routes/admin.js'
+import { metricsRegistry, recordHttpMetrics } from './metrics.js'
 
 function isDatabaseUnavailable(error) {
   const code = error.code
@@ -19,12 +20,14 @@ function isDatabaseUnavailable(error) {
     code === 'ENOTFOUND' ||
     code === 'ETIMEDOUT' ||
     code === 'PROTOCOL_CONNECTION_LOST' ||
-    code === 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR' ||
-    code === 'ER_ACCESS_DENIED_ERROR' ||
-    code === 'ER_BAD_DB_ERROR' ||
-    code === 'ER_CON_COUNT_ERROR' ||
-    code === 'ER_NO_SUCH_TABLE' ||
-    code === 'ER_BAD_FIELD_ERROR'
+    code === '28P01' ||
+    code === '3D000' ||
+    code === '53300' ||
+    code === '42P01' ||
+    code === '42703' ||
+    code === '08000' ||
+    code === '08003' ||
+    code === '08006'
   )
 }
 
@@ -32,6 +35,16 @@ export function createApp({ db, transaction } = {}) {
   const database = db || { query: queryDatabase }
   const runTransaction = transaction || (db ? (callback) => callback(database) : withTransaction)
   const app = express()
+
+  app.use(recordHttpMetrics)
+  app.get('/metrics', async (_request, response, next) => {
+    try {
+      response.set('Content-Type', metricsRegistry.contentType)
+      response.end(await metricsRegistry.metrics())
+    } catch (error) {
+      next(error)
+    }
+  })
 
   const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
     .split(',')
@@ -85,7 +98,7 @@ export function createApp({ db, transaction } = {}) {
     if (isDatabaseUnavailable(error)) {
       response.status(503).json({
         error: 'Database unavailable',
-        message: 'Không thể kết nối MySQL. Kiểm tra cấu hình DB_* và trạng thái database.',
+        message: 'Không thể kết nối PostgreSQL. Kiểm tra cấu hình DB_* và trạng thái database.',
       })
       return
     }

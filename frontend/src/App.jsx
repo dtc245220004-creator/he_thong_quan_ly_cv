@@ -503,7 +503,7 @@ function App() {
           {path === '/calendar' && <CalendarPage showTask={showTask} openCreate={openCreate} />}
           {path === '/progress' && <ProgressPage />}
           {path === '/profile' && <ProfilePage user={user} setUser={setUser} logout={logout} authBusy={authBusy} />}
-          <footer className="workspace-footer">Task Tracker · Dữ liệu được lưu trong MySQL và chỉ hiển thị trong tài khoản của bạn.</footer>
+          <footer className="workspace-footer">Task Tracker · Dữ liệu được lưu trong PostgreSQL và chỉ hiển thị trong tài khoản của bạn.</footer>
         </div>
       </main>
 

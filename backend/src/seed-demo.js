@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { pool } from './db.js'
+import { pool, withTransaction } from './db.js'
 
 const password = process.env.DEMO_USER_PASSWORD
 
@@ -24,7 +24,7 @@ const demoUsers = [
     name: 'Trần Hoàng Nam',
     focus: 'dự án phần mềm và phối hợp nhóm',
     tasks: [
-      'Phân tích yêu cầu sản phẩm', 'Phác thảo luồng đăng nhập', 'Ôn tập truy vấn MySQL',
+      'Phân tích yêu cầu sản phẩm', 'Phác thảo luồng đăng nhập', 'Ôn tập truy vấn PostgreSQL',
       'Tích hợp API danh sách công việc', 'Viết hướng dẫn cài đặt dự án', 'Kiểm tra bố cục trên điện thoại',
       'Lập kế hoạch kiểm thử tuần', 'Phân loại phản hồi người dùng', 'Cập nhật sơ đồ cơ sở dữ liệu',
       'Bổ sung xác thực cho endpoint', 'Chuẩn bị demo sprint', 'Hoàn tất review pull request',
@@ -114,43 +114,41 @@ function requireDemoConfiguration() {
 
 async function seedDemo() {
   requireDemoConfiguration()
-  const connection = await pool.getConnection()
   const totals = { accountsCreated: 0, accountsExisting: 0, tasksCreated: 0, tasksExisting: 0 }
 
-  try {
-    await connection.beginTransaction()
+  await withTransaction(async (connection) => {
     let passwordHash
     for (const user of demoUsers) {
-      const [existing] = await connection.execute(
+      const [existing] = await connection.query(
         'SELECT id, role, is_active FROM users WHERE email = ? LIMIT 1 FOR UPDATE',
         [user.email],
       )
       let userId
-      if (existing.length) {
-        if (existing[0].role !== 'user' || !existing[0].is_active) {
+      if (existing) {
+        if (existing.role !== 'user' || !existing.is_active) {
           throw new Error(`The configured demo account ${user.email} is inactive or is not a user account.`)
         }
-        userId = existing[0].id
+        userId = existing.id
         totals.accountsExisting += 1
       } else {
         passwordHash ||= await bcrypt.hash(password, 12)
-        const [result] = await connection.execute(
-          'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+        const [createdUser] = await connection.query(
+          'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?) RETURNING id',
           [user.name, user.email, passwordHash, 'user'],
         )
-        userId = result.insertId
+        userId = createdUser.id
         totals.accountsCreated += 1
       }
       user.id = userId
 
       for (let index = 0; index < user.tasks.length; index += 1) {
         const sample = buildSample(user, index)
-        const [existingTask] = await connection.execute(
+        const [existingTask] = await connection.query(
           'SELECT id, owner_id FROM tasks WHERE seed_key = ? LIMIT 1',
           [sample.key],
         )
-        if (existingTask.length) {
-          if (Number(existingTask[0].owner_id) !== Number(userId)) {
+        if (existingTask) {
+          if (Number(existingTask.owner_id) !== Number(userId)) {
             throw new Error(`Demo task key ${sample.key} is already owned by a different account.`)
           }
           totals.tasksExisting += 1
@@ -161,10 +159,10 @@ async function seedDemo() {
         const createdAt = createdOffset === 0 ? new Date() : dateAtOffset(createdOffset)
         const completedAt = sample.completed === null ? null : dateAtOffset(sample.completed)
         const updatedAt = completedAt || createdAt
-        const [result] = await connection.execute(
+        const [createdTask] = await connection.query(
           `INSERT INTO tasks
              (title, description, start_date, due_date, status, priority, owner_id, created_at, updated_at, completed_at, seed_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           [
             sample.title,
             sample.description,
@@ -179,14 +177,14 @@ async function seedDemo() {
             sample.key,
           ],
         )
-        if (!result.insertId) throw new Error(`Could not create demo task ${sample.key}.`)
+        if (!createdTask) throw new Error(`Could not create demo task ${sample.key}.`)
         totals.tasksCreated += 1
       }
     }
-    const [admins] = await connection.execute(
-      "SELECT id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id LIMIT 1 FOR UPDATE",
+    const [admin] = await connection.query(
+      "SELECT id FROM users WHERE role = 'admin' AND is_active ORDER BY id LIMIT 1 FOR UPDATE",
     )
-    if (!admins.length) {
+    if (!admin) {
       throw new Error('Create or activate an Admin account before seeding the sample activity log.')
     }
     const sampleActivities = [
@@ -200,21 +198,21 @@ async function seedDemo() {
       { key: 'system-check', offset: -1, target: 1, description: 'Mẫu minh họa: kiểm tra hoạt động quản trị' },
     ]
     for (const sample of sampleActivities) {
-      const [existingActivity] = await connection.execute(
+      const [existingActivity] = await connection.query(
         'SELECT id FROM admin_activity WHERE seed_key = ? LIMIT 1',
         [`demo:activity:${sample.key}`],
       )
-      if (existingActivity.length) {
+      if (existingActivity) {
         totals.activitiesExisting = (totals.activitiesExisting || 0) + 1
         continue
       }
       const targetUserId = demoUsers[sample.target].id
-      await connection.execute(
+      await connection.query(
         `INSERT INTO admin_activity
            (actor_id, target_user_id, target_type, target_id, action, description, details, seed_key, created_at)
          VALUES (?, ?, 'user', ?, 'demo.seed', ?, ?, ?, ?)`,
         [
-          admins[0].id,
+          admin.id,
           targetUserId,
           targetUserId,
           sample.description,
@@ -225,13 +223,7 @@ async function seedDemo() {
       )
       totals.activitiesCreated = (totals.activitiesCreated || 0) + 1
     }
-    await connection.commit()
-  } catch (error) {
-    await connection.rollback()
-    throw error
-  } finally {
-    connection.release()
-  }
+  })
 
   console.info(
     `Demo seed complete: ${totals.accountsCreated} accounts created, ${totals.accountsExisting} existing; ` +

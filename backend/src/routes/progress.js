@@ -2,12 +2,12 @@ import { Router } from 'express'
 import { parseDateRange, requestError } from './date-utils.js'
 
 const groupExpressions = {
-  day: "DATE_FORMAT(completed_at, '%Y-%m-%d')",
-  month: "DATE_FORMAT(completed_at, '%Y-%m')",
-  year: "DATE_FORMAT(completed_at, '%Y')",
+  day: "TO_CHAR(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')",
+  month: "TO_CHAR(completed_at AT TIME ZONE 'UTC', 'YYYY-MM')",
+  year: "TO_CHAR(completed_at AT TIME ZONE 'UTC', 'YYYY')",
 }
 const priorities = ['Low', 'Medium', 'High']
-const dateFromSql = 'TIMESTAMP(?)'
+const dateFromSql = "(?::date::timestamp AT TIME ZONE 'UTC')"
 
 function readRange(query) {
   return parseDateRange(query.from, query.to, 1827)
@@ -18,9 +18,9 @@ function completionFilters(request, from, to) {
     'owner_id = ?',
     "status = 'Done'",
     `completed_at >= ${dateFromSql}`,
-    'completed_at < DATE_ADD(TIMESTAMP(?), INTERVAL 1 DAY)',
+    "completed_at < ((?::date + 1)::timestamp AT TIME ZONE 'UTC')",
   ]
-  const values = [request.user.id, `${from} 00:00:00`, `${to} 00:00:00`]
+  const values = [request.user.id, from, to]
   if (request.query.priority) {
     if (!priorities.includes(request.query.priority)) {
       throw requestError(400, 'Bộ lọc ưu tiên không hợp lệ.')
@@ -43,11 +43,11 @@ export function createProgressRouter(db) {
     if (request.query.priority) createdValues.push(request.query.priority)
     const [summary] = await db.query(
       `SELECT
-         (SELECT COUNT(*) FROM tasks WHERE owner_id = ? AND DATE(created_at) BETWEEN ? AND ?${priorityFilter}) AS totalCreated,
-         (SELECT COUNT(*) FROM tasks WHERE owner_id = ? AND DATE(created_at) BETWEEN ? AND ?${priorityFilter} AND status = 'Done') AS completedFromCreated,
-         (SELECT COUNT(*) FROM tasks WHERE ${completionWhere}) AS completedInRange,
-         (SELECT COUNT(*) FROM tasks WHERE ${completionWhere} AND DATE(completed_at) = UTC_DATE()) AS completedToday,
-         (SELECT COUNT(*) FROM tasks WHERE ${completionWhere} AND DATE_FORMAT(completed_at, '%Y-%m') = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m')) AS completedThisMonth`,
+         (SELECT COUNT(*) FROM tasks WHERE owner_id = ? AND (created_at AT TIME ZONE 'UTC')::date BETWEEN ?::date AND ?::date${priorityFilter}) AS "totalCreated",
+         (SELECT COUNT(*) FROM tasks WHERE owner_id = ? AND (created_at AT TIME ZONE 'UTC')::date BETWEEN ?::date AND ?::date${priorityFilter} AND status = 'Done') AS "completedFromCreated",
+         (SELECT COUNT(*) FROM tasks WHERE ${completionWhere}) AS "completedInRange",
+         (SELECT COUNT(*) FROM tasks WHERE ${completionWhere} AND (completed_at AT TIME ZONE 'UTC')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date) AS "completedToday",
+         (SELECT COUNT(*) FROM tasks WHERE ${completionWhere} AND TO_CHAR(completed_at AT TIME ZONE 'UTC', 'YYYY-MM') = TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM')) AS "completedThisMonth"`,
       [
         ...createdValues,
         ...createdValues,
@@ -64,8 +64,8 @@ export function createProgressRouter(db) {
     previousStart.setUTCDate(previousStart.getUTCDate() - days + 1)
     const previousRangeValues = [
       request.user.id,
-      `${previousStart.toISOString().slice(0, 10)} 00:00:00`,
-      `${previousEnd.toISOString().slice(0, 10)} 00:00:00`,
+      previousStart.toISOString().slice(0, 10),
+      previousEnd.toISOString().slice(0, 10),
     ]
     const previousPrioritySql = request.query.priority ? ' AND priority = ?' : ''
     if (request.query.priority) previousRangeValues.push(request.query.priority)
@@ -73,8 +73,8 @@ export function createProgressRouter(db) {
       `SELECT COUNT(*) AS completed
        FROM tasks
        WHERE owner_id = ?
-         AND completed_at >= TIMESTAMP(?)
-         AND completed_at < DATE_ADD(TIMESTAMP(?), INTERVAL 1 DAY)
+         AND completed_at >= (?::date::timestamp AT TIME ZONE 'UTC')
+         AND completed_at < ((?::date + 1)::timestamp AT TIME ZONE 'UTC')
          AND status = 'Done'${previousPrioritySql}`,
       previousRangeValues,
     )

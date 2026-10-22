@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { pool } from './db.js'
+import { pool, queryDatabase } from './db.js'
 
 async function provisionAdmin() {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase()
@@ -15,16 +15,16 @@ async function provisionAdmin() {
     throw new Error('Set ADMIN_PASSWORD to a unique password of 12-72 bytes.')
   }
 
-  const [existing] = await pool.execute('SELECT id, is_active FROM users WHERE email = ? LIMIT 1', [email])
+  const [existing] = await queryDatabase('SELECT id, is_active FROM users WHERE email = ? LIMIT 1', [email])
   if (existing.length) {
     if (!existing[0].is_active) throw new Error('The configured admin account is inactive; activate it deliberately first.')
-    await pool.execute('UPDATE users SET role = ? WHERE id = ?', ['admin', existing[0].id])
+    await queryDatabase('UPDATE users SET role = ? WHERE id = ?', ['admin', existing[0].id])
     console.info(`Granted admin role to existing account ${email}. Its password and profile were not changed.`)
     return
   }
 
   const passwordHash = await bcrypt.hash(password, 12)
-  await pool.execute(
+  await queryDatabase(
     'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
     [name, email, passwordHash, 'admin'],
   )

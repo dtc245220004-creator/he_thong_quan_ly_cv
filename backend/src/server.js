@@ -17,7 +17,7 @@ async function shutdown(signal) {
     try {
       await pool.end()
     } catch (poolError) {
-      console.error('Failed to close the MySQL pool:', poolError.message)
+      console.error('Failed to close the PostgreSQL pool:', poolError.message)
       process.exitCode = 1
     }
   })

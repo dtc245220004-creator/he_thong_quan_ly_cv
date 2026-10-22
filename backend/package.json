@@ -10,7 +10,8 @@
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "express": "^5.1.0",
-    "mysql2": "^3.24.6",
-    "nodemailer": "^10.2.0"
+    "nodemailer": "^10.2.0",
+    "pg": "^8.23.1",
+    "prom-client": "^15.1.3"
   }
 }
